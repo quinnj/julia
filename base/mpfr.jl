@@ -404,12 +404,10 @@ function _opposite_round(r::MPFRRoundingMode)
     return r
 end
 
-function tryparse(::Type{BigFloat}, s::AbstractString; base::Integer=0, precision::Integer=_precision_with_base_2(BigFloat), rounding::MPFRRoundingMode=rounding_raw(BigFloat))
-    !isempty(s) && isspace(s[end]) && return tryparse(BigFloat, rstrip(s), base = base)
-    z = BigFloat(precision=precision)
-    err = ccall((:mpfr_set_str, libmpfr), Int32, (Ref{BigFloat}, Cstring, Int32, MPFRRoundingMode), z, s, base, rounding)
-    err == 0 ? z : nothing
-end
+tryparse(::Type{BigFloat}, s::AbstractString; base::Integer=0,
+         precision::Integer=_precision_with_base_2(BigFloat),
+         rounding::MPFRRoundingMode=rounding_raw(BigFloat)) =
+    Base.Parsers.basetryparse(BigFloat, s; base, precision, rounding)
 
 BigFloat(x::AbstractString, r::MPFRRoundingMode=rounding_raw(BigFloat); precision::Integer=_precision_with_base_2(BigFloat)) =
     parse(BigFloat, x; precision=precision, rounding=r)
@@ -1329,5 +1327,7 @@ had_divbyzero() = ccall((:mpfr_divby0_p, libmpfr), Cint, ()) != 0
 had_nan() = ccall((:mpfr_nanflag_p, libmpfr), Cint, ()) != 0
 had_inexact_exception() = ccall((:mpfr_inexflag_p, libmpfr), Cint, ()) != 0
 had_range_exception() = ccall((:mpfr_erangeflag_p, libmpfr), Cint, ()) != 0
+
+include("parsers/bigfloats.jl")
 
 end #module

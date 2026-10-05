@@ -48,6 +48,7 @@ include("adjusters.jl")
 include("rounding.jl")
 include("io.jl")
 include("parse.jl")
+include("parsers.jl")
 include("deprecated.jl")
 
 export Period, DatePeriod, TimePeriod,

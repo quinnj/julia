@@ -708,4 +708,36 @@ end
     @test Date("-2013") == Date(-2013, 01, 01)
 end
 
+# Dates adds format translation and constructors to Base's independent civil kernels.
+@testset "Base byte-parser date adapters" begin
+    P = Base.Parsers
+    @test P.parse(Date, "2024-02-29") == Date(2024, 2, 29)
+    @test P.parse(DateTime, "2024-02-29T12:34:56.123") ==
+        DateTime(2024, 2, 29, 12, 34, 56, 123)
+    @test P.parse(Time, "12:34:56.123456789") == Time(12, 34, 56, 123, 456, 789)
+    @test P.tryparse(Date, "2023-02-29") === nothing
+    @test_throws ArgumentError P.parse(Date, "2023-02-29")
+    format = DateFormat("mm/dd/yyyy")
+    @test P.parse(Date, "02/29/2024"; dateformat=format) == Date(2024, 2, 29)
+    pattern = P.compilepattern(format)
+    @test P.parse(Date, "02/29/2024"; dateformat=pattern) == Date(2024, 2, 29)
+    @test P.parse(Date, codeunits("x2024-02-29y"), 2, 11) == Date(2024, 2, 29)
+    @test P.parse(Time, "1:05 PM"; dateformat="I:MM p") == Time(13, 5)
+end
+
+# The shared parser preserves partial DateFormats and checked Dates.Timestamp resolution.
+@testset "Base parser DateFormat compatibility" begin
+    @test parse(Date, "2024-02") == Date(2024, 2, 1)
+    @test parse(DateTime, "2024-02-29T24:00:00") == DateTime(2024, 3, 1)
+    @test parse(Time, "12:34:56.123456789") == Time(12, 34, 56, 0, 0, 123456789)
+    @test parse(Dates.Timestamp, "2024-02-29T12:34:56.123456789") ==
+        Dates.Timestamp(2024, 2, 29, 12, 34, 56, 0, 0, 123456789)
+    @test tryparse(Dates.Timestamp{Millisecond}, "2024-02-29T12:34:56.123456789") === nothing
+    @test parse(Dates.Timestamp{Millisecond}, "2024-02-29T12:34:56.123") ==
+        Dates.Timestamp{Millisecond}(2024, 2, 29, 12, 34, 56, 123)
+    @test tryparse(DateTime, "2024-02-29T12:34:56.123456789", dateformat"y-m-dTH:M:S.n") === nothing
+    @test Base.Parsers.parse(Time, "12:34:56.123456789"; dateformat=Dates.ISOTimeFormat) ==
+        Time(12, 34, 56, 0, 0, 123456789)
+end
+
 end

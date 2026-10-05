@@ -337,3 +337,83 @@ end
         @test isequal(parse(Float64, s), sign(v))
     end
 end
+
+# Base's byte kernels must survive system-image serialization without loading Dates.
+@testset "Built-in byte parsing kernels" begin
+    P = Base.Parsers
+    @test isempty(Docs.undocumented_names(P))
+    for T in (Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128)
+        @test P.parse(T, "123") === T(123)
+        @test P.tryparse(T, codeunits("123")) === T(123)
+        @test P.parse(T, codeunits("x123y"), 2, 4) === T(123)
+    end
+    for T in (Float16, Float32, Float64)
+        @test P.parse(T, "1.25") === T(1.25)
+        @test P.parse(T, codeunits("x1.25y"), 2, 5) === T(1.25)
+    end
+    @test P.parse(Int, "1,234"; groupmark=',') == 1234
+    @test P.parse(Float64, "1,25"; decimal=',') === 1.25
+    @test P.tryparse(Int8, "128") === nothing
+    @test_throws OverflowError P.parse(Int8, "128")
+    @test P.tryparse(Float64, "1.2.3") === nothing
+    @test P.parse(Bool, "yes"; trues=("yes",), falses=("no",)) === true
+    @test P.parsenext(Float64, codeunits("1.25,"), 1, 5) === (1.25, 5, P.RC_OK)
+    @test P.parse(BigInt, "123456789012345678901234567890") ==
+        big"123456789012345678901234567890"
+    @test P.parse(BigFloat, "0.1") == parse(BigFloat, "0.1")
+    @test length(Base.MPFR.ParsersExt._BIGWORKSLOTS) == Threads.maxthreadid()
+    uuid = "123e4567-e89b-12d3-a456-426614174000"
+    @test P.parse(Base.UUID, uuid) == Base.UUID(uuid)
+    civil, status = P.parsecivil(codeunits("2024-02-29"), 1, 10, P.ISO_DATE)
+    @test status == P.RC_OK
+    @test (civil.year, civil.month, civil.day) == (2024, 2, 29)
+end
+
+# Ordinary Base parsing retains its string grammar while using the byte kernels
+# and the adapters owned by GMP, MPFR, and UUID.
+@testset "Base parser adapters" begin
+    for T in (Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64,
+              UInt128, Bool, Float16, Float32, Float64, BigInt, BigFloat)
+        @test typeof(map(x -> parse(T, x), AbstractString[])) == Vector{T}
+    end
+    @test parse(Int, "\u202f- \u00a042\u202f") == -42
+    @test parse(Int8, "- 0x80") == typemin(Int8)
+    @test parse(UInt8, "\u202f0xff\u202f") == typemax(UInt8)
+    @test tryparse(UInt8, "+1") === nothing
+    @test parse(Bool, "0x1") === true
+    @test parse(Bool, "00000000000000000001") === true
+    @test parse(Bool, "\u202ftrue\u202f") === true
+    @test isnan(parse(Float64, "-nan(payload_1)"))
+    @test signbit(parse(Float64, "-nan(payload_1)"))
+    if Sys.isapple()
+        @test isnan(parse(Float64, "nan(bad!)"))
+    else
+        @test tryparse(Float64, "nan(bad!)") === nothing
+    end
+    @test reinterpret(UInt64, parse(Float64, "nan(123)")) ==
+        reinterpret(UInt64, ccall(:nan, Float64, (Cstring,), "123"))
+    @test_throws ArgumentError tryparse(BigFloat, "1\0")
+    @test parse(Float16, "1e10") === Float16(Inf)
+    @test parse(Complex{Int}, "- 1 + 2im") == -1 + 2im
+    @test parse(BigInt, "--1") == 1
+    @test parse(BigInt, "1 2") == 12
+    @test parse(BigInt, "0x 10") == 16
+    @test tryparse(BigInt, "0x- 10") === nothing
+    @test tryparse(BigInt, "1\0") === nothing
+    mode = Base.MPFR.MPFRRoundDown
+    exact = parse(BigFloat, "0.1"; precision=80, rounding=mode)
+    padded = parse(BigFloat, "0.1\u202f"; precision=80, rounding=mode)
+    @test precision(exact) == precision(padded) == 80
+    @test exact == padded
+    @test parse(BigFloat, "ff"; base=16, precision=80) == 255
+    @test parse(BigFloat, "0b1.1") == 1.5
+    @test parse(BigFloat, "1@2") == 100
+    for T in (Int, Float64, Bool)
+        input = T === Bool ? "true" : "12"
+        bytes = Vector{UInt8}(codeunits(input))
+        view = Base.StringView(bytes)
+        @test parse(T, view) === parse(T, input)
+        @test Base.Parsers.parse(T, view) === Base.Parsers.parse(T, input)
+        @test bytes == codeunits(input)
+    end
+end

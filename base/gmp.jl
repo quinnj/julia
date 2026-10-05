@@ -300,31 +300,9 @@ signed(x::BigInt) = x
 BigInt(x::BigInt) = x
 Signed(x::BigInt) = x
 
-function tryparse_internal(::Type{BigInt}, s::AbstractString, startpos::Int, endpos::Int, base_::Integer, raise::Bool)
-    # don't make a copy in the common case where we are parsing a whole String
-    bstr = startpos == firstindex(s) && endpos == lastindex(s) ? String(s) : String(SubString(s,startpos,endpos))
-
-    sgn, base, i = Base.parseint_preamble(true,Int(base_),bstr,firstindex(bstr),lastindex(bstr))
-    if !(2 <= base <= 62)
-        raise && throw(ArgumentError("invalid base: base must be 2 ≤ base ≤ 62, got $base"))
-        return nothing
-    end
-    if i == 0
-        raise && throw(ArgumentError("premature end of integer: $(repr(bstr))"))
-        return nothing
-    end
-    z = BigInt()
-    if Base.containsnul(bstr)
-        err = -1 # embedded NUL char (not handled correctly by GMP)
-    else
-        err = GC.@preserve bstr MPZ.set_str!(z, pointer(bstr)+(i-firstindex(bstr)), base)
-    end
-    if err != 0
-        raise && throw(ArgumentError("invalid BigInt: $(repr(bstr))"))
-        return nothing
-    end
-    flipsign!(z, sgn)
-end
+tryparse_internal(::Type{BigInt}, s::AbstractString, i::Int, j::Int,
+                  base::Integer, raise::Bool) =
+    Base.Parsers.baseparse_internal(BigInt, s, i, j, base, raise)
 
 BigInt(x::Union{Clong,Int32}) = MPZ.set_si(x)
 BigInt(x::Union{Culong,UInt32}) = MPZ.set_ui(x)
@@ -1130,5 +1108,7 @@ function Base.cmp(x::Rational{BigInt}, y::Rational{BigInt})
 end
 
 end # MPQ module
+
+include("parsers/bigints.jl")
 
 end # module

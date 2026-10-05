@@ -142,6 +142,7 @@ using .Libc: getpid, gethostname, time, memcpy, memset, memmove, memcmp
 
 # More strings & printing
 include("regex.jl")
+include("parsers/Parsers.jl")
 include("parse.jl")
 include("shell.jl")
 const IRShow = Compiler.IRShow # an alias for compatibility
@@ -243,6 +244,7 @@ using .PermutedDimsArrays
 # Combinatorics
 include("sort.jl")
 using .Sort
+Core.eval(Parsers, :(include("parsers/civil.jl")))
 
 # Fast math
 include("fastmath.jl")
@@ -290,6 +292,7 @@ include("threadcall.jl")
 
 # code loading
 include("uuid.jl")
+Core.eval(Parsers, :(include("parsers/uuid_api.jl")))
 include("pkgid.jl")
 include("toml/toml.jl")
 include("linking.jl")

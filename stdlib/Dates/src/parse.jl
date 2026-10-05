@@ -189,28 +189,9 @@ end
     end
 end
 
-@inline function tryparsenext_base10(str::AbstractString, i::Int, len::Int, min_width::Int=1, max_width::Int=0)
-    i > len && return nothing
-    min_pos = min_width <= 0 ? i : i + min_width - 1
-    max_pos = max_width <= 0 ? len : min(i + max_width - 1, len)
-    d::Int64 = 0
-    @inbounds while i <= max_pos
-        c, ii = iterate(str, i)::Tuple{Char, Int}
-        if '0' <= c <= '9'
-            digit = Int64(c - '0')
-            d > div(typemax(Int64) - digit, 10) && return nothing
-            d = d * 10 + digit
-        else
-            break
-        end
-        i = ii
-    end
-    if i <= min_pos
-        return nothing
-    else
-        return d, i
-    end
-end
+@inline tryparsenext_base10(str::AbstractString, i::Int, len::Int,
+                           min_width::Int=1, max_width::Int=0) =
+    Base.Parsers.parsedigits(str, i, len, min_width, max_width)
 
 @inline function tryparsenext_word(str::AbstractString, i, len, locale, maxchars=0)
     word_start, word_end = i, 0
@@ -231,117 +212,14 @@ end
     end
 end
 
-function Base.parse(::Type{DateTime}, s::AbstractString, df::typeof(ISODateTimeFormat))
-    i, end_pos = firstindex(s), lastindex(s)
-    i > end_pos && throw(ArgumentError("Cannot parse an empty string as a DateTime"))
+Base.parse(::Type{DateTime}, str::AbstractString, df::typeof(ISODateTimeFormat)) =
+    Base.Parsers.baseparse(DateTime, str, df)
 
-    coefficient = 1
-    local dy
-    dm = dd = Int64(1)
-    th = tm = ts = tms = Int64(0)
-    @label error begin
-        @label done begin
-            # Optional sign
-            let val = tryparsenext_sign(s, i, end_pos)
-                if val !== nothing
-                    coefficient, i = val
-                end
-            end
+Base.parse(::Type{T}, str::AbstractString, df::DateFormat=default_format(T)) where {T<:TimeType} =
+    Base.Parsers.baseparse(T, str, df)
 
-            let val = tryparsenext_base10(s, i, end_pos, 1)
-                val === nothing && break error
-                dy, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != '-' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 2)
-                val === nothing && break error
-                dm, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != '-' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 2)
-                val === nothing && break error
-                dd, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != 'T' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 2)
-                val === nothing && break error
-                th, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != ':' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 2)
-                val === nothing && break error
-                tm, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != ':' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 2)
-                val === nothing && break error
-                ts, i = val
-                i > end_pos && break done
-            end
-
-            c, i = iterate(s, i)::Tuple{Char, Int}
-            c != '.' && break error
-            i > end_pos && break done
-
-            let val = tryparsenext_base10(s, i, end_pos, 1, 3)
-                val === nothing && break error
-                tms, j = val
-                tms *= 10 ^ (3 - (j - i))
-                j > end_pos || break error
-            end
-        end
-
-        return DateTime(dy * coefficient, dm, dd, th, tm, ts, tms)
-    end
-    throw(ArgumentError("Invalid DateTime string"))
-end
-
-function Base.parse(::Type{T}, str::AbstractString, df::DateFormat=default_format(T)) where T<:TimeType
-    pos, len = firstindex(str), lastindex(str)
-    pos > len && throw(ArgumentError("Cannot parse an empty string as a Date or Time"))
-    val = tryparsenext_internal(T, str, pos, len, df, true)
-    @assert val !== nothing
-    values, endpos = val
-    return T(values...)::T
-end
-
-function Base.tryparse(::Type{T}, str::AbstractString, df::DateFormat=default_format(T)) where T<:TimeType
-    pos, len = firstindex(str), lastindex(str)
-    pos > len && return nothing
-    res = tryparsenext_internal(T, str, pos, len, df, false)
-    res === nothing && return nothing
-    values, endpos = res
-    if validargs(T, values...) === nothing
-        # TODO: validargs gets called twice, since it's called again in the T constructor
-        return T(values...)::T
-    end
-    return nothing
-end
+Base.tryparse(::Type{T}, str::AbstractString, df::DateFormat=default_format(T)) where {T<:TimeType} =
+    Base.Parsers.basetryparse(T, str, df)
 
 """
     parse_components(str::AbstractString, df::DateFormat)::Array{Any}

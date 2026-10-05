@@ -161,26 +161,8 @@ end
 # Parse the digits of a fractional second as a count of 10^-precision seconds: with
 # precision 9, "5" is 500000000 and "123456789" is 123456789. Digits past `precision`
 # must be zero.
-@inline function tryparsenext_fraction(d::DatePart, str, i, len, precision)
-    ndigits = 0
-    frac = Int64(0)
-    max_digits = max_width(d)
-    @inbounds while i <= len && (max_digits == 0 || ndigits < max_digits)
-        c, ii = iterate(str, i)::Tuple{Char, Int}
-        '0' <= c <= '9' || break
-        digit = Int64(c - '0')
-        ndigits += 1
-        if ndigits <= precision
-            frac = 10frac + digit
-        elseif digit != 0
-            return nothing
-        end
-        i = ii
-    end
-    ndigits >= min_width(d) || return nothing
-    ndigits < precision && (frac *= Int64(10) ^ (precision - ndigits))
-    return frac, i
-end
+@inline tryparsenext_fraction(d::DatePart, str, i, len, precision) =
+    Base.Parsers.parsefraction(str, i, len, min_width(d), max_width(d), precision)
 
 @inline tryparsenext(d::DatePart{'s'}, str, i, len) = tryparsenext_fraction(d, str, i, len, 3)
 @inline tryparsenext(d::DatePart{'n'}, str, i, len) = tryparsenext_fraction(d, str, i, len, 9)

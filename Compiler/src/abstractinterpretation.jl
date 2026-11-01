@@ -217,7 +217,9 @@ function abstract_call_gf_by_type(interp::AbstractInterpreter, @nospecialize(fun
                         this_const_conditional = ignorelimited(narrowed)
                     end
                     const_result = nothing
-                    if this_const_rt ⊑ₚ this_rt
+                    # compare the values only: `narrow_mustalias` above has put the alias of
+                    # `this_rt` on `this_const_rt` where applicable
+                    if this_const_rt ⊑ₚ widenwrappedmustalias(this_rt)
                         # As long as the const-prop result we have is not *worse* than
                         # what we found out on types, we'd like to use it. Even if the
                         # end result is exactly equivalent, it is likely that the IR
@@ -3459,7 +3461,8 @@ end
 function abstract_eval_new(interp::AbstractInterpreter, e::Expr, sstate::StatementState,
                            sv::AbsIntState)
     𝕃ᵢ = typeinf_lattice(interp)
-    rt, _... = instanceof_tfunc(abstract_eval_value(interp, e.args[1], sstate, sv), true)
+    argtype = abstract_eval_value(interp, e.args[1], sstate, sv)
+    rt, _... = instanceof_tfunc(argtype, true)
     ut = unwrap_unionall(rt)
     exct = Union{ErrorException,TypeError}
     if isa(ut, DataType) && !isabstracttype(ut)
@@ -3483,7 +3486,8 @@ function abstract_eval_new(interp::AbstractInterpreter, e::Expr, sstate::Stateme
         # have well-defined field count, and field-level extended lattice elements carry
         # information beyond the declared type.
         if fcount !== nothing
-            nothrow = isconcretedispatch(rt)
+            # `:new` throws on a `UnionAll` or `Union` rep that is only `==` to `rt` (#61323)
+            nothrow = isconcretedispatch(rt) && widenconst(argtype) <: DataType
             @assert nargs ≤ fcount "malformed :new expression" # syntactically enforced by the front-end
             ats = Vector{Any}(undef, nargs)
             local anyrefine = false
@@ -3559,7 +3563,10 @@ end
 function abstract_eval_splatnew(interp::AbstractInterpreter, e::Expr, sstate::StatementState,
                                 sv::AbsIntState)
     𝕃ᵢ = typeinf_lattice(interp)
-    rt, isexact = instanceof_tfunc(abstract_eval_value(interp, e.args[1], sstate, sv), true)
+    argtype = abstract_eval_value(interp, e.args[1], sstate, sv)
+    rt, isexact = instanceof_tfunc(argtype, true)
+    # `:splatnew` throws on a `UnionAll` or `Union` rep that is only `==` to `rt` (#61323)
+    isexact = isexact && widenconst(argtype) <: DataType
     nothrow = false
     if length(e.args) == 2 && isconcretedispatch(rt) && !ismutabletype(rt)
         at = abstract_eval_value(interp, e.args[2], sstate, sv)
@@ -5013,14 +5020,17 @@ function apply_refinement!(
     vtype = currstate[slotid]
     oldtyp = vtype.typ
     ⊏ = strictpartialorder(𝕃ᵢ)
-    if newtyp ⊏ oldtyp
-        refinement = StateRefinement(slotid, newtyp, vtype.undef)
+    # a slot holding a `MustAlias` still aliases the field after the refinement,
+    # so compare with the field type and keep the alias (cf. `conditional_change`)
+    if newtyp ⊏ widenmustalias(ignorelimited(oldtyp))
+        refinement = StateRefinement(slotid, narrow_mustalias(𝕃ᵢ, newtyp, oldtyp), vtype.undef)
         strefine1!(currstate, refinement)
         for i in 1:length(currstate)
             slot_aliases[i] == slotid || continue
             alias_vtype = currstate[i]
-            if newtyp ⊏ alias_vtype.typ
-                strefine1!(currstate, StateRefinement(i, newtyp, alias_vtype.undef))
+            if newtyp ⊏ widenmustalias(ignorelimited(alias_vtype.typ))
+                alias_newtyp = narrow_mustalias(𝕃ᵢ, newtyp, alias_vtype.typ)
+                strefine1!(currstate, StateRefinement(i, alias_newtyp, alias_vtype.undef))
             end
         end
     end
